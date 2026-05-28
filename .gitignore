@@ -3,6 +3,7 @@ build/
 .DS_Store
 *.app
 *.icns
+!Resources/AppIcon.icns
 .swiftpm/
 Package.resolved
 xcuserdata/
