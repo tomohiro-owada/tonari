@@ -2,6 +2,9 @@
 
 > 隣にいるローカル AI アシスタント — macOS メニューバーから Ollama を呼ぶ常駐アプリ
 
+<img width="256" height="256" alt="tonari" src="https://github.com/user-attachments/assets/11e914b3-675f-4da1-8584-a4d010b70043" />
+
+
 Tonari は menubar に常駐する Mac ネイティブ (SwiftUI) の Ollama クライアントです。
 あなたのカレンダーやメールをローカルで読み取り、LLM に「補佐」させます。
 データはマシンの外には出ません。
