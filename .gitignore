@@ -1,0 +1,11 @@
+.build/
+build/
+.DS_Store
+*.app
+*.icns
+.swiftpm/
+Package.resolved
+xcuserdata/
+*.xcuserstate
+.vscode/
+.idea/
