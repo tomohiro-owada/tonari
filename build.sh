@@ -68,6 +68,8 @@ ${ICON_KEY}
     <string>リマインダー一覧を参照し、LLM 経由で新規追加します (追加時は必ず確認画面が出ます)。</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>Mail.app から未読・最近のメールを読み出して LLM の補佐コンテキストにします。</string>
+    <key>NSCameraUsageDescription</key>
+    <string>定期的にカメラで写真を撮り、LLM に在席状況を判定させます。写真は判定後に破棄され、判定結果のみがローカルの JSON ログに保存されます。</string>
 </dict>
 </plist>
 PLIST

@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct ChatView: View {
     @EnvironmentObject var state: AppState
     @FocusState private var inputFocused: Bool
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,6 +44,37 @@ struct ChatView: View {
             }
             .buttonStyle(.bordered)
             .disabled(state.isStreaming)
+
+            Button {
+                state.openNextMeetNow()
+            } label: {
+                Label("次の Meet", systemImage: "video.fill")
+                    .font(.caption)
+            }
+            .buttonStyle(.bordered)
+            .help("直近の Meet URL 付き予定をブラウザで開く")
+
+            if state.slackConnected {
+                Button {
+                    state.runSlackUnreadSummary()
+                } label: {
+                    Label("Slack 未読", systemImage: "number.circle")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .disabled(state.isStreaming)
+                .help("未読 DM・メンション・チャンネルを要約")
+
+                Button {
+                    state.runSlackThreadReplies()
+                } label: {
+                    Label("未読リプライ", systemImage: "bubble.left.and.bubble.right")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .disabled(state.isStreaming)
+                .help("購読中スレッドの未読リプライのみを要約")
+            }
             Spacer()
         }
         .padding(.horizontal, 12)
@@ -85,6 +117,19 @@ struct ChatView: View {
             .menuStyle(.borderlessButton)
             .fixedSize()
             Spacer()
+
+            if let p = state.currentPresence {
+                HStack(spacing: 3) {
+                    Text(p.status.emoji)
+                    Text(p.status.label)
+                        .font(.caption)
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(.quaternary.opacity(0.7), in: Capsule())
+                .help("最新の在席判定: \(p.note) (\(p.timestamp.formatted(date: .omitted, time: .shortened)))")
+            }
+
             Toggle(isOn: $state.thinkMode) {
                 Image(systemName: "brain")
             }
@@ -102,6 +147,15 @@ struct ChatView: View {
             }
             .buttonStyle(.borderless)
             .help("履歴をクリア")
+
+            Button {
+                openWindow(id: "settings")
+                NSApp.activate(ignoringOtherApps: true)
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .buttonStyle(.borderless)
+            .help("設定")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -558,5 +612,219 @@ struct ToolConfirmationSheet: View {
         }
         .padding(16)
         .frame(width: 380)
+    }
+}
+
+// MARK: - Settings sheet
+
+struct SettingsView: View {
+    @EnvironmentObject var state: AppState
+    @Environment(\.dismissWindow) private var dismissWindow
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Image(systemName: "gearshape.fill").foregroundStyle(.secondary)
+                Text("設定").font(.headline)
+                Spacer()
+            }
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle(isOn: $state.autoOpenMeet) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("会議開始前に Google Meet を自動で開く")
+                            .font(.body)
+                        Text("カレンダーに Meet URL があるイベントが対象")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+
+                if state.autoOpenMeet {
+                    HStack {
+                        Text("チェック間隔:")
+                        Stepper(value: $state.meetCheckIntervalMinutes, in: 1...30) {
+                            Text("\(state.meetCheckIntervalMinutes) 分")
+                                .frame(minWidth: 60, alignment: .trailing)
+                                .monospacedDigit()
+                        }
+                    }
+                    HStack {
+                        Text("何分前に開く:")
+                        Stepper(value: $state.meetLeadMinutes, in: 1...30) {
+                            Text("\(state.meetLeadMinutes) 分前")
+                                .frame(minWidth: 60, alignment: .trailing)
+                                .monospacedDigit()
+                        }
+                    }
+                    if !state.meetMonitorStatus.isEmpty {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            Text(state.meetMonitorStatus)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Button {
+                        state.runMeetMonitorOnce()
+                    } label: {
+                        Label("今すぐチェック", systemImage: "arrow.triangle.2.circlepath")
+                            .font(.caption)
+                    }
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle(isOn: $state.autoPresenceCheck) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("カメラで在席状況を定期チェック")
+                            .font(.body)
+                        Text("写真は判定後すぐ破棄、結果のみ JSON に保存")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+
+                if state.autoPresenceCheck {
+                    HStack {
+                        Text("チェック間隔:")
+                        Stepper(value: $state.presenceIntervalMinutes, in: 1...60) {
+                            Text("\(state.presenceIntervalMinutes) 分")
+                                .frame(minWidth: 60, alignment: .trailing)
+                                .monospacedDigit()
+                        }
+                    }
+                }
+
+                HStack {
+                    Button {
+                        Task { await state.runPresenceCheckOnce() }
+                    } label: {
+                        if state.isCheckingPresence {
+                            ProgressView().controlSize(.small)
+                            Text("撮影中…").font(.caption)
+                        } else {
+                            Label("今すぐ撮影してテスト", systemImage: "camera")
+                                .font(.caption)
+                        }
+                    }
+                    .disabled(state.isCheckingPresence)
+
+                    Spacer()
+                    if !state.presenceHistory.isEmpty {
+                        Button(role: .destructive) {
+                            state.clearPresenceHistory()
+                        } label: {
+                            Label("履歴削除", systemImage: "trash")
+                                .font(.caption)
+                        }
+                    }
+                }
+
+                if !state.presenceHistory.isEmpty {
+                    Text("最近の判定 (最大5件)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 3) {
+                        ForEach(state.presenceHistory.suffix(5).reversed()) { entry in
+                            HStack(spacing: 6) {
+                                Text(entry.status.emoji)
+                                Text(entry.status.label).bold()
+                                Text(entry.note)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                Spacer()
+                                Text(entry.timestamp.formatted(date: .omitted, time: .shortened))
+                                    .foregroundStyle(.tertiary)
+                                    .monospacedDigit()
+                            }
+                            .font(.caption)
+                        }
+                    }
+                    .padding(8)
+                    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Text("Slack 連携").font(.body).bold()
+                    Text("BETA")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.orange.opacity(0.85), in: Capsule())
+                    Spacer()
+                }
+                Text("Slack デスクトップアプリのローカルストレージから自分のトークン (xoxc) と d クッキーを抽出します。会社ワークスペースでの利用はセキュリティポリシーをご確認ください。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 6) {
+                    Image(systemName: state.slackConnected ? "checkmark.circle.fill" : "xmark.circle")
+                        .foregroundStyle(state.slackConnected ? .green : .secondary)
+                    Text(state.slackConnected
+                         ? "接続済み (token: …\(state.slackTokenPreview))"
+                         : "未接続")
+                        .font(.caption)
+                    Spacer()
+                }
+
+                HStack {
+                    Button {
+                        state.attemptSlackExtraction()
+                    } label: {
+                        if state.isExtractingSlack {
+                            ProgressView().controlSize(.small)
+                            Text("抽出中…").font(.caption)
+                        } else {
+                            Label(state.slackConnected ? "再抽出" : "Slack に接続", systemImage: "link")
+                                .font(.caption)
+                        }
+                    }
+                    .disabled(state.isExtractingSlack)
+                    if state.slackConnected {
+                        Button {
+                            state.testSlackConnection()
+                        } label: {
+                            Label("接続テスト", systemImage: "antenna.radiowaves.left.and.right")
+                                .font(.caption)
+                        }
+                        Button(role: .destructive) {
+                            state.disconnectSlack()
+                        } label: {
+                            Label("切断", systemImage: "link.badge.plus")
+                                .font(.caption)
+                        }
+                    }
+                    Spacer()
+                }
+                if !state.slackExtractStatus.isEmpty {
+                    Text(state.slackExtractStatus)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            HStack {
+                Spacer()
+                Button("閉じる") { dismissWindow(id: "settings") }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
     }
 }

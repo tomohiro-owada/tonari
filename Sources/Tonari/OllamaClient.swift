@@ -36,6 +36,43 @@ struct OllamaClient {
         return decoded.models.map { $0.name }.sorted()
     }
 
+    /// One-shot, non-streaming chat call. Useful for background tasks that
+    /// don't need to render token-by-token (e.g. periodic presence checks).
+    func oneShot(
+        model: String,
+        prompt: String,
+        image: Data? = nil,
+        timeout: TimeInterval = 120
+    ) async throws -> String {
+        var req = URLRequest(url: baseURL.appendingPathComponent("/api/chat"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = timeout
+
+        var userMsg: [String: Any] = ["role": "user", "content": prompt]
+        if let image {
+            userMsg["images"] = [image.base64EncodedString()]
+        }
+        let body: [String: Any] = [
+            "model": model,
+            "messages": [userMsg],
+            "stream": false
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+            throw NSError(
+                domain: "OllamaClient",
+                code: http.statusCode,
+                userInfo: [NSLocalizedDescriptionKey: "Ollama HTTP \(http.statusCode)"]
+            )
+        }
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let message = json?["message"] as? [String: Any]
+        return (message?["content"] as? String) ?? ""
+    }
+
     private struct ChatChunk: Decodable {
         struct Msg: Decodable {
             let content: String?
